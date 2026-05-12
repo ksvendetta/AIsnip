@@ -2,6 +2,10 @@
 
 A Windows-focused screen snip and annotation tool for sending marked-up screenshots to an AI chat.
 
+## Download
+
+[Download AIsnip.exe](https://github.com/ksvendetta/AIsnip/releases/download/v0.1.0/AIsnip.exe)
+
 ## Features
 
 - Assign a global shortcut by clicking keys on an on-screen keyboard.
