@@ -1,0 +1,6 @@
+Pillow>=10.4
+pynput>=1.7
+pyautogui>=0.9
+pywin32>=306; platform_system == "Windows"
+pystray>=0.19
+pyinstaller>=6.20
