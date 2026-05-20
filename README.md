@@ -4,7 +4,7 @@ A Windows-focused screen snip and annotation tool for sending marked-up screensh
 
 ## Download
 
-[Download AIsnip.exe](https://github.com/ksvendetta/AIsnip/releases/download/v0.1.0/AIsnip.exe)
+[Download AIsnip.exe](https://github.com/ksvendetta/AIsnip/releases/download/v0.2.0/AIsnip.exe)
 
 ## Features
 
@@ -18,7 +18,7 @@ A Windows-focused screen snip and annotation tool for sending marked-up screensh
 - Snip a screen region, capture the whole screen, or pick a window.
 - Hold the window shortcut, such as `f8`, to highlight the window under the cursor and capture it on release.
 - Draw arrows, notation bubbles, rectangles, circles/ellipses, and lines.
-- Click with the bubble tool to type a note and create an auto-sized callout with a tail pointing at the clicked spot.
+- Click with the bubble tool to type a note inline directly on the canvas; the callout auto-sizes, wraps long text, and places itself on whichever side of the click has more room.
 - Hover annotations to highlight them, click to select, drag to move, and drag handles to reshape. Press `Delete` to remove the selected item, press `Ctrl+Z` to undo, and double-click a bubble to edit its text.
 - Change item color and increase/decrease item size.
 - Minimize to the system tray and keep listening for the shortcut in the background.
