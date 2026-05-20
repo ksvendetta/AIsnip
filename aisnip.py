@@ -54,9 +54,9 @@ COLORS = {
 
 
 DEFAULT_CONFIG = {
-    "hotkey": "shift+mouse:right",
-    "window_hotkey": "shift+mouse:left",
-    "fullscreen_hotkey": "shift+mouse:middle",
+    "hotkey": "ctrl+shift+x",
+    "window_hotkey": "ctrl+shift+z",
+    "fullscreen_hotkey": "ctrl+shift+a",
     "color": "#ff2d2d",
     "stroke_width": 4,
     "font_size": 24,
@@ -255,7 +255,42 @@ def single_key_name(value: str) -> Optional[str]:
 
 def key_to_name(key: keyboard.Key | keyboard.KeyCode) -> str:
     if isinstance(key, keyboard.KeyCode):
-        return (key.char or "").lower()
+        vk = getattr(key, "vk", None)
+        if vk is not None:
+            if 0x30 <= vk <= 0x39:
+                return chr(vk)
+            if 0x41 <= vk <= 0x5A:
+                return chr(vk).lower()
+            if 0x60 <= vk <= 0x69:
+                return chr(0x30 + (vk - 0x60))
+            if 0x70 <= vk <= 0x87:
+                return f"f{vk - 0x6F}"
+            if vk == 0xBC:
+                return ","
+            if vk == 0xBE:
+                return "."
+            if vk == 0xBF:
+                return "/"
+            if vk == 0xBA:
+                return ";"
+            if vk == 0xDE:
+                return "'"
+            if vk == 0xDB:
+                return "["
+            if vk == 0xDD:
+                return "]"
+            if vk == 0xDC:
+                return "\\"
+            if vk == 0xC0:
+                return "`"
+            if vk == 0xBD:
+                return "-"
+            if vk == 0xBB:
+                return "="
+        char = key.char or ""
+        if char and char.isprintable():
+            return char.lower()
+        return ""
     name = key.name or str(key)
     name = name.replace("Key.", "").lower()
     if name in {"print_screen", "print"}:

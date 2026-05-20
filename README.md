@@ -50,11 +50,11 @@ Enable **Run AIsnip when Windows starts** in the app. This creates a per-user st
 
 ## Shortcut Notes
 
-The default snip shortcut is `shift+mouse:right`. Use **Choose Keys** in the app to select modifier keys and a main key from the on-screen keyboard.
+The default snip shortcut is `ctrl+shift+x`. Use **Choose Keys** in the app to select modifier keys and a main key from the on-screen keyboard.
 
-The default hold-to-select-window shortcut is `shift+mouse:left`. Press and hold it to highlight the window under the cursor, then release it to capture that window for notation.
+The default hold-to-select-window shortcut is `ctrl+shift+z`. Press and hold it to highlight the window under the cursor, then release it to capture that window for notation.
 
-The default full-screen snapshot shortcut is `shift+mouse:middle`. Press it once to capture the whole screen and open it for notation.
+The default full-screen snapshot shortcut is `ctrl+shift+a`. Press it once to capture the whole screen and open it for notation.
 
 Use the shortcuts this way:
 
