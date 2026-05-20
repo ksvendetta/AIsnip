@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover - app is Windows-focused, but import sta
     win32api = None
 
 import tkinter as tk
-from tkinter import colorchooser, messagebox, simpledialog, ttk
+from tkinter import colorchooser, messagebox, ttk
 
 
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
@@ -695,6 +695,12 @@ class AnnotationEditor(tk.Toplevel):
         self.drag_mode: Optional[str] = None
         self.drag_start: Optional[tuple[int, int]] = None
         self.drag_original: Optional[tuple[tuple[int, int], tuple[int, int], list[tuple[int, int]]]] = None
+        self.text_editor: Optional[tk.Text] = None
+        self.text_editor_window: Optional[int] = None
+        self.editing_index: Optional[int] = None
+        self.editing_anchor: Optional[tuple[int, int]] = None
+        self.editing_original_items: Optional[list[AnnotationItem]] = None
+        self.ignore_text_focusout = False
         self.tool = tk.StringVar(value="bubble")
         self.color = tk.StringVar(value=config.get("color", "#ff2d2d"))
         self.stroke_width = tk.IntVar(value=int(config.get("stroke_width", 4)))
@@ -702,16 +708,20 @@ class AnnotationEditor(tk.Toplevel):
         apply_app_style(self)
         self.title("AIsnip Editor")
         self.configure(bg=COLORS["editor_bg"])
-        self.geometry(f"{min(self.base.width + 80, 1400)}x{min(self.base.height + 130, 900)}")
-        apply_rounded_window(self, 18)
         self.protocol("WM_DELETE_WINDOW", self.destroy)
         self._build_ui()
+        self.update_idletasks()
+        min_width = max(self.toolbar.winfo_reqwidth() + 24, 800)
+        min_height = 280
+        self.minsize(min_width, min_height)
+        self.geometry(f"{max(min_width, min(self.base.width + 80, 1400))}x{max(min_height, min(self.base.height + 130, 900))}")
+        apply_rounded_window(self, 18)
         self._render()
 
     def _build_ui(self) -> None:
-        toolbar = ttk.Frame(self, padding=(12, 9), style="Toolbar.TFrame")
-        toolbar.pack(side="top", fill="x")
-        ttk.Label(toolbar, text="Tools", background=COLORS["toolbar"], foreground=COLORS["muted"], font=("Segoe UI Semibold", 9)).pack(side="left", padx=(0, 8))
+        self.toolbar = ttk.Frame(self, padding=(12, 9), style="Toolbar.TFrame")
+        self.toolbar.pack(side="top", fill="x")
+        ttk.Label(self.toolbar, text="Tools", background=COLORS["toolbar"], foreground=COLORS["muted"], font=("Segoe UI Semibold", 9)).pack(side="left", padx=(0, 8))
         for label, value in [
             ("Arrow", "arrow"),
             ("Bubble", "bubble"),
@@ -719,13 +729,13 @@ class AnnotationEditor(tk.Toplevel):
             ("Oval", "ellipse"),
             ("Line", "line"),
         ]:
-            ttk.Radiobutton(toolbar, text=label, value=value, variable=self.tool, style="Tool.TRadiobutton").pack(side="left", padx=1)
-        ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=10)
-        RoundedButton(toolbar, text="Color", command=self.pick_color, width=82, height=32, radius=9, bg=COLORS["toolbar"]).pack(side="left", padx=2)
-        RoundedButton(toolbar, text="-", command=lambda: self.resize_items(-1), width=36, height=32, radius=9, bg=COLORS["toolbar"]).pack(side="left", padx=(8, 2))
-        RoundedButton(toolbar, text="+", command=lambda: self.resize_items(1), width=36, height=32, radius=9, bg=COLORS["toolbar"]).pack(side="left", padx=2)
-        RoundedButton(toolbar, text="Undo", command=self.undo, width=76, height=32, radius=9, bg=COLORS["toolbar"]).pack(side="left", padx=(12, 2))
-        RoundedButton(toolbar, text="Done", command=self.done, width=88, height=32, radius=9, fill=COLORS["primary"], hover=COLORS["primary_hover"], active=COLORS["primary_hover"], foreground="#ffffff", outline=COLORS["primary"], bg=COLORS["toolbar"]).pack(side="right", padx=2)
+            ttk.Radiobutton(self.toolbar, text=label, value=value, variable=self.tool, style="Tool.TRadiobutton").pack(side="left", padx=1)
+        ttk.Separator(self.toolbar, orient="vertical").pack(side="left", fill="y", padx=10)
+        RoundedButton(self.toolbar, text="Color", command=self.pick_color, width=82, height=32, radius=9, bg=COLORS["toolbar"]).pack(side="left", padx=2)
+        RoundedButton(self.toolbar, text="-", command=lambda: self.resize_items(-1), width=36, height=32, radius=9, bg=COLORS["toolbar"]).pack(side="left", padx=(8, 2))
+        RoundedButton(self.toolbar, text="+", command=lambda: self.resize_items(1), width=36, height=32, radius=9, bg=COLORS["toolbar"]).pack(side="left", padx=2)
+        RoundedButton(self.toolbar, text="Undo", command=self.undo, width=76, height=32, radius=9, bg=COLORS["toolbar"]).pack(side="left", padx=(12, 2))
+        RoundedButton(self.toolbar, text="Done", command=self.done, width=88, height=32, radius=9, fill=COLORS["primary"], hover=COLORS["primary_hover"], active=COLORS["primary_hover"], foreground="#ffffff", outline=COLORS["primary"], bg=COLORS["toolbar"]).pack(side="right", padx=2)
 
         frame = ttk.Frame(self, padding=10, style="App.TFrame")
         frame.pack(fill="both", expand=True)
@@ -775,6 +785,8 @@ class AnnotationEditor(tk.Toplevel):
 
     def begin_item(self, event: tk.Event) -> None:
         self.canvas.focus_set()
+        if self.text_editor is not None:
+            self.finish_bubble_editor()
         x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
         point = (int(x), int(y))
         handle = self.handle_at(point)
@@ -792,13 +804,7 @@ class AnnotationEditor(tk.Toplevel):
             return
         self.selected_index = None
         if self.tool.get() == "bubble":
-            text = simpledialog.askstring("Notation Bubble", "Text:", parent=self)
-            if not text:
-                return
-            self.push_history()
-            self.items.append(self.create_bubble(point, text))
-            self.selected_index = len(self.items) - 1
-            self._render()
+            self.start_bubble_editor(point)
             return
         self.current_item = AnnotationItem(
             self.tool.get(),
@@ -837,28 +843,209 @@ class AnnotationEditor(tk.Toplevel):
         self.current_item = None
         self._render()
 
-    def create_bubble(self, anchor: tuple[int, int], text: str) -> AnnotationItem:
-        font = self.annotation_font(self.font_size.get())
-        lines = text.splitlines() or [text]
+    def create_bubble(
+        self,
+        anchor: tuple[int, int],
+        text: str,
+        color: Optional[str] = None,
+        width: Optional[int] = None,
+        font_size: Optional[int] = None,
+    ) -> AnnotationItem:
+        font_size = font_size if font_size is not None else self.font_size.get()
+        stroke_width = width if width is not None else self.stroke_width.get()
+        font = self.annotation_font(font_size)
         probe = Image.new("RGB", (1, 1))
         draw = ImageDraw.Draw(probe)
-        line_boxes = [draw.textbbox((0, 0), line or " ", font=font) for line in lines]
-        text_width = max(box[2] - box[0] for box in line_boxes)
-        line_height = max(font.size + 4 if hasattr(font, "size") else 18, max(box[3] - box[1] for box in line_boxes) + 6)
         padding_x = 18
         padding_y = 14
-        bubble_width = max(110, text_width + padding_x * 2)
-        bubble_height = max(54, line_height * len(lines) + padding_y * 2)
+        max_bubble_width = min(420, max(80, self.base.width - 16))
         ax, ay = anchor
-        left = ax + 34
+        right_space = max(56, self.base.width - (ax + 34) - 8)
+        left_space = max(56, ax - 34 - 8)
+        side = "right" if right_space >= 110 or right_space >= left_space else "left"
+        side_space = right_space if side == "right" else left_space
+        side_space = min(max_bubble_width, max(56, side_space))
+        max_text_width = max(28, side_space - padding_x * 2)
+        lines = self.wrap_bubble_text(text, font, max_text_width, draw)
+        line_boxes = [draw.textbbox((0, 0), line or " ", font=font) for line in lines]
+        text_width = max([box[2] - box[0] for box in line_boxes] or [0])
+        line_height = self.bubble_line_height(font, line_boxes)
+        bubble_width = max(110, text_width + padding_x * 2)
+        bubble_width = min(max_bubble_width, max(56, bubble_width, min(110, side_space)))
+        bubble_height = max(54, line_height * len(lines) + padding_y * 2)
+        left = ax + 34 if side == "right" else ax - bubble_width - 34
         top = ay - bubble_height - 28
-        if left + bubble_width > self.base.width:
-            left = max(8, ax - bubble_width - 34)
+        if left + bubble_width > self.base.width - 8:
+            left = self.base.width - bubble_width - 8
+        if left < 8:
+            left = 8
         if top < 8:
             top = min(self.base.height - bubble_height - 8, ay + 28)
+        if top < 8:
+            top = 8
         right = left + bubble_width
         bottom = top + bubble_height
-        return AnnotationItem("bubble", (int(left), int(top)), (int(right), int(bottom)), self.color.get(), self.stroke_width.get(), self.font_size.get(), text, [anchor])
+        return AnnotationItem("bubble", (int(left), int(top)), (int(right), int(bottom)), color or self.color.get(), stroke_width, font_size, text, [anchor])
+
+    @staticmethod
+    def bubble_line_height(font: ImageFont.ImageFont, line_boxes: list[tuple[int, int, int, int]]) -> int:
+        font_size = getattr(font, "size", 18)
+        measured = max([box[3] - box[1] for box in line_boxes] or [font_size])
+        return max(font_size + 12, measured + 10)
+
+    @staticmethod
+    def text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> float:
+        return draw.textlength(text or " ", font=font)
+
+    def wrap_bubble_text(self, text: str, font: ImageFont.ImageFont, max_width: int, draw: ImageDraw.ImageDraw) -> list[str]:
+        wrapped: list[str] = []
+        paragraphs = text.split("\n")
+        if not paragraphs:
+            return [""]
+        for paragraph in paragraphs:
+            if paragraph == "":
+                wrapped.append("")
+                continue
+            line = ""
+            for word in paragraph.split(" "):
+                candidate = word if not line else f"{line} {word}"
+                if self.text_width(draw, candidate, font) <= max_width:
+                    line = candidate
+                    continue
+                if line:
+                    wrapped.append(line)
+                line = ""
+                chunk = ""
+                for char in word:
+                    candidate_chunk = f"{chunk}{char}"
+                    if self.text_width(draw, candidate_chunk, font) <= max_width:
+                        chunk = candidate_chunk
+                    else:
+                        if chunk:
+                            wrapped.append(chunk)
+                        chunk = char
+                line = chunk
+            wrapped.append(line)
+        return wrapped or [""]
+
+    def start_bubble_editor(self, anchor: tuple[int, int], index: Optional[int] = None) -> None:
+        self.cancel_bubble_editor(commit=True)
+        self.editing_original_items = copy.deepcopy(self.items)
+        self.editing_anchor = anchor
+        self.editing_index = index
+        text = ""
+        if index is None:
+            self.items.append(self.create_bubble(anchor, ""))
+            self.selected_index = len(self.items) - 1
+        else:
+            text = self.items[index].text
+            self.selected_index = index
+        self.text_editor = tk.Text(
+            self.canvas,
+            bd=0,
+            highlightthickness=0,
+            relief="flat",
+            wrap="word",
+            undo=False,
+            font=("Segoe UI", -self.items[self.selected_index].font_size),  # type: ignore[index]
+            bg="#ffffff",
+            fg="#111111",
+            insertbackground="#111111",
+            padx=0,
+            pady=0,
+        )
+        self.text_editor.insert("1.0", text)
+        self.text_editor.bindtags((str(self.text_editor), "Text", "all"))
+        self.text_editor.bind("<Return>", self.finish_bubble_editor)
+        self.text_editor.bind("<Shift-Return>", self.insert_bubble_linebreak)
+        self.text_editor.bind("<KeyRelease>", self.update_bubble_editor)
+        self.text_editor.bind("<FocusOut>", self.on_bubble_editor_focus_out)
+        self.text_editor.bind("<Escape>", lambda _event: self.cancel_bubble_editor())
+        self.text_editor.bind("<Control-Return>", lambda _event: self.finish_bubble_editor())
+        self._render()
+        self.place_bubble_editor()
+        self.text_editor.focus_set()
+
+    def update_bubble_editor(self, _event: Optional[tk.Event] = None) -> str:
+        if self.text_editor is None or self.selected_index is None or self.editing_anchor is None:
+            return "break"
+        current = self.items[self.selected_index]
+        text = self.text_editor.get("1.0", "end-1c")
+        self.items[self.selected_index] = self.create_bubble(self.editing_anchor, text, current.color, current.width, current.font_size)
+        self.ignore_text_focusout = True
+        self._render()
+        self.place_bubble_editor()
+        self.text_editor.focus_set()
+        self.after_idle(lambda: setattr(self, "ignore_text_focusout", False))
+        return "break"
+
+    def on_bubble_editor_focus_out(self, _event: tk.Event) -> Optional[str]:
+        if self.ignore_text_focusout:
+            return None
+        return self.finish_bubble_editor()
+
+    def insert_bubble_linebreak(self, _event: tk.Event) -> str:
+        if self.text_editor is None:
+            return "break"
+        self.text_editor.insert("insert", "\n")
+        self.update_bubble_editor()
+        return "break"
+
+    def place_bubble_editor(self) -> None:
+        if self.text_editor is None or self.selected_index is None:
+            return
+        item = self.items[self.selected_index]
+        x1, y1, x2, y2 = self.item_bounds(item)
+        width = max(20, x2 - x1 - 36)
+        height = max(20, y2 - y1 - 28)
+        if self.text_editor_window is not None:
+            self.canvas.delete(self.text_editor_window)
+        self.text_editor.configure(font=("Segoe UI", -item.font_size))
+        self.text_editor_window = self.canvas.create_window(x1 + 18, y1 + 14, window=self.text_editor, anchor="nw", width=width, height=height)
+
+    def finish_bubble_editor(self, _event: Optional[tk.Event] = None) -> str:
+        if self.text_editor is None:
+            return "break"
+        index = self.selected_index
+        original = self.editing_original_items
+        text = self.text_editor.get("1.0", "end-1c")
+        self.destroy_bubble_editor()
+        if index is not None and 0 <= index < len(self.items) and not text.strip():
+            self.items.pop(index)
+            self.selected_index = None
+        if original is not None and self.items != original:
+            self.history.append(original)
+            if len(self.history) > 50:
+                self.history.pop(0)
+        self._render()
+        self.canvas.focus_set()
+        return "break"
+
+    def cancel_bubble_editor(self, commit: bool = False) -> str:
+        if self.text_editor is None:
+            return "break"
+        if commit:
+            return self.finish_bubble_editor()
+        original = self.editing_original_items
+        self.destroy_bubble_editor()
+        if original is not None:
+            self.items = original
+        self.selected_index = None
+        self._render()
+        self.canvas.focus_set()
+        return "break"
+
+    def destroy_bubble_editor(self) -> None:
+        if self.text_editor_window is not None:
+            self.canvas.delete(self.text_editor_window)
+        if self.text_editor is not None:
+            self.text_editor.destroy()
+        self.text_editor = None
+        self.text_editor_window = None
+        self.editing_index = None
+        self.editing_anchor = None
+        self.editing_original_items = None
+        self.ignore_text_focusout = False
 
     def undo(self) -> None:
         if not self.history:
@@ -1052,12 +1239,8 @@ class AnnotationEditor(tk.Toplevel):
         if index is None or self.items[index].tool != "bubble":
             return
         self.selected_index = index
-        text = simpledialog.askstring("Notation Bubble", "Text:", initialvalue=self.items[index].text, parent=self)
-        if text is not None:
-            old_anchor = self.items[index].points[0] if self.items[index].points else point
-            self.items[index] = self.create_bubble(old_anchor, text)
-            self.selected_index = index
-            self._render()
+        old_anchor = self.items[index].points[0] if self.items[index].points else point
+        self.start_bubble_editor(old_anchor, index)
 
     def draw_item(self, draw: ImageDraw.ImageDraw, item: AnnotationItem) -> None:
         x1, y1 = item.start
@@ -1084,11 +1267,15 @@ class AnnotationEditor(tk.Toplevel):
             draw.rounded_rectangle((x1, y1, x2, y2), radius=14, outline=item.color, width=width, fill=(255, 255, 255, 230))
             if item.text:
                 font = self.annotation_font(item.font_size)
+                probe = Image.new("RGB", (1, 1))
+                measure = ImageDraw.Draw(probe)
+                lines = self.wrap_bubble_text(item.text, font, max(28, abs(x2 - x1) - 36), measure)
+                line_boxes = [measure.textbbox((0, 0), line or " ", font=font) for line in lines]
+                line_height = self.bubble_line_height(font, line_boxes)
                 y = min(y1, y2) + 14
-                for line in item.text.splitlines():
+                for line in lines:
                     draw.text((min(x1, x2) + 18, y), line, fill="#111111", font=font)
-                    bbox = draw.textbbox((0, 0), line or " ", font=font)
-                    y += max(item.font_size + 4, bbox[3] - bbox[1] + 6)
+                    y += line_height
 
     @staticmethod
     def annotation_font(size: int) -> ImageFont.ImageFont:
@@ -1110,6 +1297,8 @@ class AnnotationEditor(tk.Toplevel):
         draw.polygon(points, fill=color)
 
     def done(self) -> None:
+        if self.text_editor is not None:
+            self.finish_bubble_editor()
         image = self.flatten()
         copy_image_to_clipboard(image)
         self.destroy()
